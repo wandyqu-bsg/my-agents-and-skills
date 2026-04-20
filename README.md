@@ -1,78 +1,142 @@
 # 🤖 My Agents & Skills
 
-> Personal collection of agents & skills — reusable across devices and shareable with the team.
+> 个人 GitHub Copilot Agents 和 Skills 的统一管理仓库。  
+> 换设备时一键恢复，也可分享给团队成员直接使用。
 
 ---
 
-## 📁 Repository Structure
+## 📁 仓库结构
 
 ```
 my-agents-and-skills/
-├── agents/                  # AI Agents
-│   ├── README.md            # Agents index & descriptions
-│   └── example-agent/      # Example agent template
-│       ├── README.md
-│       └── agent.md
-├── skills/                  # Skills / Tools
-│   ├── README.md            # Skills index & descriptions
-│   └── example-skill/      # Example skill template
-│       ├── README.md
-│       └── skill.md
-├── docs/                    # Documentation
-│   └── how-to-use.md
-└── CONTRIBUTING.md          # Contribution guidelines
+├── agents/                    # 自定义 Copilot Agents (.agent.md)
+│   └── README.md              # 自动生成的 agent 列表（勿手动编辑）
+├── skills/                    # 自定义 Copilot Skills (.md)
+│   └── README.md              # 自动生成的 skill 列表（勿手动编辑）
+├── scripts/
+│   ├── sync-to-repo.sh        # ⬆️  本地 → 仓库（备份）
+│   └── sync-from-repo.sh      # ⬇️  仓库 → 本地（恢复/同步）
+└── README.md
 ```
 
 ---
 
-## 🚀 Quick Start
+## 🚀 快速开始
 
-### Clone to a new device
+### 第一步：Clone 仓库
+
 ```bash
-git clone https://github.com/wandyqu-bsg/my-agents-and-skills.git
+git clone git@github.com:wandyqu-bsg/my-agents-and-skills.git
 cd my-agents-and-skills
 ```
 
-### Pull latest updates
+### 第二步：赋予脚本执行权限（只需第一次）
+
 ```bash
-git pull origin main
+chmod +x scripts/sync-to-repo.sh
+chmod +x scripts/sync-from-repo.sh
 ```
 
 ---
 
-## 📂 Agents
+## 📖 两个脚本的使用说明
 
-Browse the [`agents/`](./agents/) folder for all available agents.
+### ⬆️ `sync-to-repo.sh` — 本地备份到仓库
 
-Each agent includes:
-- A `README.md` describing what it does and how to use it
-- The agent definition file (`agent.md`)
+**场景**：你在当前设备新建或修改了 Agent / Skill，想同步保存到 GitHub。
 
----
+```bash
+bash scripts/sync-to-repo.sh
+```
 
-## 🛠️ Skills
-
-Browse the [`skills/`](./skills/) folder for all available skills.
-
-Each skill includes:
-- A `README.md` describing what it does and how to use it
-- The skill definition file (`skill.md`)
+**脚本会做什么：**
+1. 扫描本地 `~/.config/Code/User/prompts/*.agent.md`，复制变更文件到 `agents/`
+2. 扫描本地 `~/.copilot/skills/*.md`，复制变更文件到 `skills/`
+3. 自动更新 `agents/README.md` 和 `skills/README.md`（文件列表）
+4. 自动 `git commit` + `git push` 到远端仓库
 
 ---
 
-## 👥 For Team Members
+### ⬇️ `sync-from-repo.sh` — 从仓库恢复到本地
 
-1. **Browse** the `agents/` or `skills/` folders to find what you need
-2. **Clone** the repo or copy the specific file you want
-3. **Follow** the individual README for usage instructions
-4. **Contribute** your own agents/skills — see [CONTRIBUTING.md](./CONTRIBUTING.md)
+**场景 A**：换了新设备，clone 完仓库后执行此脚本，立即恢复所有 Agents / Skills。  
+**场景 B**：团队成员分享了新的 Agent / Skill 到仓库，你想同步到本地。
+
+```bash
+bash scripts/sync-from-repo.sh
+```
+
+**脚本会做什么：**
+1. 自动执行 `git pull` 拉取最新仓库内容
+2. 将 `agents/*.agent.md` 复制到本地 `~/.config/Code/User/prompts/`
+3. 将 `skills/*.md` 复制到本地 `~/.copilot/skills/`
+4. 提示重启 VS Code
+
+> ⚠️ **执行完毕后请重启 VS Code**，新的 Agents / Skills 才会生效。
 
 ---
 
-## 📖 Documentation
+## 🔄 日常工作流
 
-See [`docs/how-to-use.md`](./docs/how-to-use.md) for detailed usage instructions.
+```
+┌─────────────────────────────────────────────────────────────┐
+│  在当前设备新建 / 修改了 Agent 或 Skill                      │
+│                          │                                  │
+│                          ▼                                  │
+│          bash scripts/sync-to-repo.sh                       │
+│          （自动备份 + commit + push 到 GitHub）              │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  换新设备 / 拉取团队最新 Agents & Skills                     │
+│                          │                                  │
+│                          ▼                                  │
+│  git clone git@github.com:wandyqu-bsg/my-agents-and-skills  │
+│  bash scripts/sync-from-repo.sh                             │
+│  重启 VS Code ✅                                             │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-*Maintained by [@wandyqu-bsg](https://github.com/wandyqu-bsg)*
+## 📂 本地目录说明
+
+| 类型 | 本地路径 | 仓库路径 |
+|------|----------|----------|
+| Agents | `~/.config/Code/User/prompts/*.agent.md` | `agents/` |
+| Skills | `~/.copilot/skills/*.md` | `skills/` |
+
+> 脚本只做**增量同步**（仅复制新增或有变更的文件），不会删除你本地已有的文件。
+
+---
+
+## 👥 团队成员使用方式
+
+1. Clone 仓库（Public 仓库无需任何权限）：
+   ```bash
+   git clone git@github.com:wandyqu-bsg/my-agents-and-skills.git
+   cd my-agents-and-skills
+   chmod +x scripts/sync-from-repo.sh
+   bash scripts/sync-from-repo.sh
+   ```
+2. 重启 VS Code，即可使用所有 Agents 和 Skills。
+3. 想贡献新的 Agent / Skill？Fork 仓库 → 添加文件 → 发 Pull Request。
+
+---
+
+## ❓ 常见问题
+
+**Q: Agent 里调用了某个 Skill，换设备后还能正常使用吗？**  
+A: 可以。只要执行 `sync-from-repo.sh` 后，两者都会被恢复到对应目录，互相调用不受影响。
+
+**Q: 脚本会覆盖我本地已有的文件吗？**  
+A: 脚本使用增量对比，只有文件内容发生变更时才会覆盖，相同内容的文件不会被动。
+
+**Q: 支持 Windows 吗？**  
+A: 脚本为 Bash 脚本，适用于 macOS / Linux。Windows 用户请使用 WSL2 或 Git Bash 执行。
+
+---
+
+## 📜 License
+
+MIT © [wandyqu-bsg](https://github.com/wandyqu-bsg)
