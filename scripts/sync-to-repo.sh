@@ -1,3 +1,6 @@
+cd ~/dev/my-agents-and-skills   # 进入你的仓库目录
+
+cat > scripts/sync-to-repo.sh << 'ENDOFSCRIPT'
 #!/bin/bash
 # =============================================================================
 # sync-to-repo.sh
@@ -8,7 +11,7 @@
 set -e
 
 # -- 路径配置 ------------------------------------------------------------------
-REPO_DIR="$(cd "")(dirname "$0")/.." && pwd)"
+REPO_DIR="$(git rev-parse --show-toplevel)"
 LOCAL_AGENTS_DIR="${HOME}/.config/Code/User/prompts"
 LOCAL_SKILLS_DIR="${HOME}/.copilot/skills"
 REPO_AGENTS_DIR="${REPO_DIR}/agents"
@@ -21,7 +24,7 @@ warn()  { echo -e "${YELLOW}[WARN]${NC}  $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
 # -- 前置检查 ------------------------------------------------------------------
-[ -d "$REPO_DIR/.git" ] || error "请在仓库目录内运行此脚本，或检查路径配置。"
+[ -d "$REPO_DIR/.git" ] || error "请在仓库目录内运行此脚本。"
 command -v git &>/dev/null || error "未找到 git，请先安装。"
 
 info "仓库路径: $REPO_DIR"
@@ -108,7 +111,7 @@ if git diff --cached --quiet; then
   warn "没有任何变更需要提交。"
 else
   COMMIT_MSG="sync: local to repo [$(date '+%Y-%m-%d')] agents:${AGENT_COUNT} skills:${SKILL_COUNT}"
-git commit -m "$COMMIT_MSG"
+  git commit -m "$COMMIT_MSG"
 
   # 优先尝试 SSH，失败则自动切换 HTTPS
   if git push 2>/dev/null; then
@@ -117,7 +120,14 @@ git commit -m "$COMMIT_MSG"
     warn "SSH 推送失败，尝试通过 HTTPS 推送..."
     REMOTE_URL=$(git remote get-url origin)
     HTTPS_URL=$(echo "$REMOTE_URL" | sed 's|git@github.com:|https://github.com/|')
-git push "$HTTPS_URL"
+    git push "$HTTPS_URL"
     info "推送完成（HTTPS）！提交信息: $COMMIT_MSG"
   fi
 fi
+ENDOFSCRIPT
+
+# 推送到 GitHub
+chmod +x scripts/sync-to-repo.sh
+git add scripts/sync-to-repo.sh
+git commit -m "fix: rewrite sync-to-repo.sh to fix all syntax errors"
+git push
