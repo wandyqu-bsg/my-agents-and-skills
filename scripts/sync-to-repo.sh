@@ -1,133 +1,113 @@
-cd ~/dev/my-agents-and-skills   # 进入你的仓库目录
-
-cat > scripts/sync-to-repo.sh << 'ENDOFSCRIPT'
 #!/bin/bash
 # =============================================================================
 # sync-to-repo.sh
-# 将本地自定义的 Agents 和 Skills 同步到 my-agents-and-skills 仓库
+# 将本地自定义的 Agents / Skills 同步到仓库目录（只同步文件，不提交远程）
 # 用法: bash scripts/sync-to-repo.sh
 # =============================================================================
 
-set -e
+set -euo pipefail
 
-# -- 路径配置 ------------------------------------------------------------------
-REPO_DIR="$(git rev-parse --show-toplevel)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 LOCAL_AGENTS_DIR="${HOME}/.config/Code/User/prompts"
 LOCAL_SKILLS_DIR="${HOME}/.copilot/skills"
 REPO_AGENTS_DIR="${REPO_DIR}/agents"
 REPO_SKILLS_DIR="${REPO_DIR}/skills"
 
-# -- 颜色输出 ------------------------------------------------------------------
-GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; BLUE='\033[0;34m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC}  $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $1"; }
+step()  { echo -e "${BLUE}[STEP]${NC}  $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
-# -- 前置检查 ------------------------------------------------------------------
-[ -d "$REPO_DIR/.git" ] || error "请在仓库目录内运行此脚本。"
-command -v git &>/dev/null || error "未找到 git，请先安装。"
+print_list() {
+  local title="$1"
+  shift
+  local items=("$@")
+  echo "$title"
+  if [ ${#items[@]} -eq 0 ]; then
+    echo "  - (无)"
+    return
+  fi
+  local item
+  for item in "${items[@]}"; do
+    echo "  - $item"
+  done
+}
 
-info "仓库路径: $REPO_DIR"
-info "开始同步本地 Agents / Skills 到仓库..."
+[ -d "${REPO_DIR}/.git" ] || error "请在 my-agents-and-skills 仓库内运行脚本。"
 
-# -- 同步 Agents (.agent.md) ---------------------------------------------------
-mkdir -p "$REPO_AGENTS_DIR"
-AGENT_COUNT=0
+mkdir -p "$REPO_AGENTS_DIR" "$REPO_SKILLS_DIR"
+
+info "仓库路径: ${REPO_DIR}"
+step "扫描本地自定义 Agents / Skills ..."
+
+local_agents=()
+local_skills=()
+sync_agents=()
+sync_skills=()
+staged_paths=()
 
 if [ -d "$LOCAL_AGENTS_DIR" ]; then
   while IFS= read -r -d '' file; do
-    filename=$(basename "$file")
-    dest="${REPO_AGENTS_DIR}/${filename}"
-    if [ ! -f "$dest" ] || ! diff -q "$file" "$dest" &>/dev/null; then
+    name="$(basename "$file")"
+    local_agents+=("$name")
+    dest="${REPO_AGENTS_DIR}/${name}"
+    if [ ! -f "$dest" ] || ! cmp -s "$file" "$dest"; then
       cp "$file" "$dest"
-      info "  [Agent] 已同步: $filename"
-      AGENT_COUNT=$((AGENT_COUNT + 1))
+      sync_agents+=("$name")
+      staged_paths+=("agents/${name}")
     fi
-  done < <(find "$LOCAL_AGENTS_DIR" -maxdepth 1 -name "*.agent.md" -print0)
-  [ $AGENT_COUNT -eq 0 ] && warn "  [Agent] 没有新增或变更的 agent 文件。"
+  done < <(find "$LOCAL_AGENTS_DIR" -maxdepth 1 -type f -name "*.agent.md" -print0 | sort -z)
 else
-  warn "  [Agent] 本地目录不存在: $LOCAL_AGENTS_DIR"
+  warn "本地 Agents 目录不存在: $LOCAL_AGENTS_DIR"
 fi
-
-# -- 同步 Skills ---------------------------------------------------------------
-mkdir -p "$REPO_SKILLS_DIR"
-SKILL_COUNT=0
 
 if [ -d "$LOCAL_SKILLS_DIR" ]; then
-  while IFS= read -r -d '' file; do
-    filename=$(basename "$file")
-    dest="${REPO_SKILLS_DIR}/${filename}"
-    if [ ! -f "$dest" ] || ! diff -q "$file" "$dest" &>/dev/null; then
-      cp "$file" "$dest"
-      info "  [Skill] 已同步: $filename"
-      SKILL_COUNT=$((SKILL_COUNT + 1))
+  while IFS= read -r -d '' entry; do
+    rel_name="$(basename "$entry")"
+    local_skills+=("$rel_name")
+    dest="${REPO_SKILLS_DIR}/${rel_name}"
+
+    if [ -d "$entry" ]; then
+      if [ ! -d "$dest" ] || ! diff -qr "$entry" "$dest" >/dev/null 2>&1; then
+        mkdir -p "$dest"
+        cp -a "$entry"/. "$dest"/
+        sync_skills+=("$rel_name/")
+        staged_paths+=("skills/${rel_name}")
+      fi
+    elif [ -f "$entry" ]; then
+      if [ ! -f "$dest" ] || ! cmp -s "$entry" "$dest"; then
+        cp "$entry" "$dest"
+        sync_skills+=("$rel_name")
+        staged_paths+=("skills/${rel_name}")
+      fi
     fi
-  done < <(find "$LOCAL_SKILLS_DIR" -maxdepth 1 -name "*.md" -print0)
-  [ $SKILL_COUNT -eq 0 ] && warn "  [Skill] 没有新增或变更的 skill 文件。"
+  done < <(find "$LOCAL_SKILLS_DIR" -mindepth 1 -maxdepth 1 \( -type d -o -type f \) ! -name ".*" -print0 | sort -z)
 else
-  warn "  [Skill] 本地目录不存在: $LOCAL_SKILLS_DIR"
+  warn "本地 Skills 目录不存在: $LOCAL_SKILLS_DIR"
 fi
 
-# -- 自动生成 agents/README.md -------------------------------------------------
-info "正在更新 agents/README.md ..."
-{
-  printf '# Agents\n\n'
-  printf '本目录存放所有自定义 GitHub Copilot Agents。\n\n'
-  printf '| 文件名 | 大小 | 最后修改时间 |\n'
-  printf '|--------|------|-------------|\n'
-  for f in "$REPO_AGENTS_DIR"/*.agent.md; do
-    [ -f "$f" ] || continue
-    fname=$(basename "$f")
-    fsize=$(wc -c < "$f" | tr -d ' ')
-    fdate=$(date -r "$f" '+%Y-%m-%d %H:%M' 2>/dev/null || stat -c '%y' "$f" | cut -d' ' -f1,2 | cut -c1-16)
-    printf '| `%s` | %s bytes | %s |\n' "$fname" "$fsize" "$fdate"
-  done
-  printf '\n> 自动生成于 %s，请勿手动编辑此文件。\n' "$(date '+%Y-%m-%d %H:%M:%S')"
-} > "${REPO_AGENTS_DIR}/README.md"
+echo ""
+print_list "扫描到的本地 Agents:" "${local_agents[@]}"
+print_list "扫描到的本地 Skills:" "${local_skills[@]}"
+echo ""
+print_list "成功同步到仓库的 Agents:" "${sync_agents[@]}"
+print_list "成功同步到仓库的 Skills:" "${sync_skills[@]}"
+echo ""
 
-# -- 自动生成 skills/README.md -------------------------------------------------
-info "正在更新 skills/README.md ..."
-{
-  printf '# Skills\n\n'
-  printf '本目录存放所有自定义 GitHub Copilot Skills。\n\n'
-  printf '| 文件名 | 大小 | 最后修改时间 |\n'
-  printf '|--------|------|-------------|\n'
-  for f in "$REPO_SKILLS_DIR"/*.md; do
-    [ -f "$f" ] || continue
-    fname=$(basename "$f")
-    [ "$fname" = "README.md" ] && continue
-    fsize=$(wc -c < "$f" | tr -d ' ')
-    fdate=$(date -r "$f" '+%Y-%m-%d %H:%M' 2>/dev/null || stat -c '%y' "$f" | cut -d' ' -f1,2 | cut -c1-16)
-    printf '| `%s` | %s bytes | %s |\n' "$fname" "$fsize" "$fdate"
-  done
-  printf '\n> 自动生成于 %s，请勿手动编辑此文件。\n' "$(date '+%Y-%m-%d %H:%M:%S')"
-} > "${REPO_SKILLS_DIR}/README.md"
-
-# -- Git 提交并推送 ------------------------------------------------------------
-cd "$REPO_DIR"
-git add agents/ skills/
-
-if git diff --cached --quiet; then
-  warn "没有任何变更需要提交。"
-else
-  COMMIT_MSG="sync: local to repo [$(date '+%Y-%m-%d')] agents:${AGENT_COUNT} skills:${SKILL_COUNT}"
-  git commit -m "$COMMIT_MSG"
-
-  # 优先尝试 SSH，失败则自动切换 HTTPS
-  if git push 2>/dev/null; then
-    info "推送完成（SSH）！提交信息: $COMMIT_MSG"
-  else
-    warn "SSH 推送失败，尝试通过 HTTPS 推送..."
-    REMOTE_URL=$(git remote get-url origin)
-    HTTPS_URL=$(echo "$REMOTE_URL" | sed 's|git@github.com:|https://github.com/|')
-    git push "$HTTPS_URL"
-    info "推送完成（HTTPS）！提交信息: $COMMIT_MSG"
-  fi
+if [ ${#local_agents[@]} -eq 0 ] && [ ${#local_skills[@]} -eq 0 ]; then
+  warn "未检测到本地自定义 Agents/Skills，可先在 VS Code 中创建后再同步。"
 fi
-ENDOFSCRIPT
 
-# 推送到 GitHub
-chmod +x scripts/sync-to-repo.sh
-git add scripts/sync-to-repo.sh
-git commit -m "fix: rewrite sync-to-repo.sh to fix all syntax errors"
-git push
+if [ ${#sync_agents[@]} -eq 0 ] && [ ${#sync_skills[@]} -eq 0 ]; then
+  info "没有需要更新到仓库的文件，当前已经是最新同步状态。"
+else
+  git -C "$REPO_DIR" add -- "${staged_paths[@]}"
+  info "本地内容已同步到仓库目录（仅文件同步，未执行 git 提交/推送）。"
+  info "本次同步的文件已执行 git add，便于你后续手动提交。"
+fi
+
+echo ""
+info "如果你觉得这些 Agents/Skills 很好用，欢迎手动 git push 分享到远程仓库。"

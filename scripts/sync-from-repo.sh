@@ -1,79 +1,113 @@
 #!/bin/bash
 # =============================================================================
 # sync-from-repo.sh
-# 将 my-agents-and-skills 仓库里最新的 Agents 和 Skills 同步到本地
+# 将仓库中的 Agents / Skills 同步到本地 VS Code 目录
 # 用法: bash scripts/sync-from-repo.sh
 # =============================================================================
 
-set -e
+set -euo pipefail
 
-# ── 路径配置 ──────────────────────────────────────────────────────────────────
-REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 LOCAL_AGENTS_DIR="${HOME}/.config/Code/User/prompts"
 LOCAL_SKILLS_DIR="${HOME}/.copilot/skills"
 REPO_AGENTS_DIR="${REPO_DIR}/agents"
 REPO_SKILLS_DIR="${REPO_DIR}/skills"
 
-# ── 颜色输出 ──────────────────────────────────────────────────────────────────
-GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
-info()    { echo -e "${GREEN}[INFO]${NC}  $1"; }
-warn()    { echo -e "${YELLOW}[WARN]${NC}  $1"; }
-error()   { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; BLUE='\033[0;34m'; NC='\033[0m'
+info()  { echo -e "${GREEN}[INFO]${NC}  $1"; }
+warn()  { echo -e "${YELLOW}[WARN]${NC}  $1"; }
+step()  { echo -e "${BLUE}[STEP]${NC}  $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
-# ── 前置检查 ──────────────────────────────────────────────────────────────────
-[ -d "$REPO_DIR/.git" ] || error "请在仓库目录内运行此脚本，或检查路径配置。"
-command -v git &>/dev/null || error "未找到 git，请先安装。"
+print_list() {
+  local title="$1"
+  shift
+  local items=("$@")
+  echo "$title"
+  if [ ${#items[@]} -eq 0 ]; then
+    echo "  - (无)"
+    return
+  fi
+  local item
+  for item in "${items[@]}"; do
+    echo "  - $item"
+  done
+}
 
-info "仓库路径: $REPO_DIR"
+[ -d "${REPO_DIR}/.git" ] || error "请在 my-agents-and-skills 仓库目录中运行脚本。"
+command -v git >/dev/null 2>&1 || error "未检测到 git，请先安装。"
 
-# ── 拉取最新仓库内容 ──────────────────────────────────────────────────────────
-info "正在拉取仓库最新内容 (git pull)..."
+mkdir -p "$LOCAL_AGENTS_DIR" "$LOCAL_SKILLS_DIR"
+
+info "仓库路径: ${REPO_DIR}"
+step "拉取远程仓库最新内容 ..."
 cd "$REPO_DIR"
-git pull
+git pull --ff-only
 
-# ── 同步 Agents → 本地 ────────────────────────────────────────────────────────
-mkdir -p "$LOCAL_AGENTS_DIR"
-AGENT_COUNT=0
+step "扫描仓库中的 Agents / Skills ..."
+
+repo_agents=()
+repo_skills=()
+sync_agents=()
+sync_skills=()
 
 if [ -d "$REPO_AGENTS_DIR" ]; then
   while IFS= read -r -d '' file; do
-    filename=$(basename "$file")
-    dest="${LOCAL_AGENTS_DIR}/${filename}"
-    if [ ! -f "$dest" ] || ! diff -q "$file" "$dest" &>/dev/null; then
+    name="$(basename "$file")"
+    repo_agents+=("$name")
+    dest="${LOCAL_AGENTS_DIR}/${name}"
+    if [ ! -f "$dest" ] || ! cmp -s "$file" "$dest"; then
       cp "$file" "$dest"
-      info "  [Agent] 已同步: $filename"
-      AGENT_COUNT=$((AGENT_COUNT + 1))
+      sync_agents+=("$name")
     fi
-  done < <(find "$REPO_AGENTS_DIR" -maxdepth 1 -name "*.agent.md" -print0)
-  [ $AGENT_COUNT -eq 0 ] && warn "  [Agent] 没有新增或变更的 agent 文件。"
+  done < <(find "$REPO_AGENTS_DIR" -maxdepth 1 -type f -name "*.agent.md" -print0 | sort -z)
 else
-  warn "  [Agent] 仓库目录不存在: $REPO_AGENTS_DIR"
+  warn "仓库 Agents 目录不存在: $REPO_AGENTS_DIR"
 fi
-
-# ── 同步 Skills → 本地 ────────────────────────────────────────────────────────
-mkdir -p "$LOCAL_SKILLS_DIR"
-SKILL_COUNT=0
 
 if [ -d "$REPO_SKILLS_DIR" ]; then
-  while IFS= read -r -d '' file; do
-    filename=$(basename "$file")
-    [ "$filename" = "README.md" ] && continue
-    dest="${LOCAL_SKILLS_DIR}/${filename}"
-    if [ ! -f "$dest" ] || ! diff -q "$file" "$dest" &>/dev/null; then
-      cp "$file" "$dest"
-      info "  [Skill] 已同步: $filename"
-      SKILL_COUNT=$((SKILL_COUNT + 1))
+  while IFS= read -r -d '' entry; do
+    rel_name="$(basename "$entry")"
+    [ "$rel_name" = ".gitkeep" ] && continue
+    [ "$rel_name" = "README.md" ] && continue
+    repo_skills+=("$rel_name")
+
+    dest="${LOCAL_SKILLS_DIR}/${rel_name}"
+    if [ -d "$entry" ]; then
+      if [ ! -d "$dest" ] || ! diff -qr "$entry" "$dest" >/dev/null 2>&1; then
+        mkdir -p "$dest"
+        cp -a "$entry"/. "$dest"/
+        sync_skills+=("$rel_name/")
+      fi
+    elif [ -f "$entry" ]; then
+      if [ ! -f "$dest" ] || ! cmp -s "$entry" "$dest"; then
+        cp "$entry" "$dest"
+        sync_skills+=("$rel_name")
+      fi
     fi
-  done < <(find "$REPO_SKILLS_DIR" -maxdepth 1 -name "*.md" -print0)
-  [ $SKILL_COUNT -eq 0 ] && warn "  [Skill] 没有新增或变更的 skill 文件。"
+  done < <(find "$REPO_SKILLS_DIR" -mindepth 1 -maxdepth 1 \( -type d -o -type f \) ! -name ".*" -print0 | sort -z)
 else
-  warn "  [Skill] 仓库目录不存在: $REPO_SKILLS_DIR"
+  warn "仓库 Skills 目录不存在: $REPO_SKILLS_DIR"
 fi
 
-# ── 完成提示 ──────────────────────────────────────────────────────────────────
 echo ""
-info "✅ 同步完成！"
-info "   Agents 已写入: $LOCAL_AGENTS_DIR  (共 ${AGENT_COUNT} 个变更)"
-info "   Skills 已写入: $LOCAL_SKILLS_DIR  (共 ${SKILL_COUNT} 个变更)"
+print_list "扫描到的仓库 Agents:" "${repo_agents[@]}"
+print_list "扫描到的仓库 Skills:" "${repo_skills[@]}"
 echo ""
-warn "👉 请重启 VS Code 以使新的 Agents / Skills 生效。"
+print_list "成功同步到本地的 Agents:" "${sync_agents[@]}"
+print_list "成功同步到本地的 Skills:" "${sync_skills[@]}"
+echo ""
+
+if [ ${#repo_agents[@]} -eq 0 ] && [ ${#repo_skills[@]} -eq 0 ]; then
+  warn "仓库中暂未发现可同步的 Agents/Skills。"
+fi
+
+if [ ${#sync_agents[@]} -eq 0 ] && [ ${#sync_skills[@]} -eq 0 ]; then
+  info "本地已是最新，无需同步。"
+else
+  info "远程仓库中的 Agents/Skills 已同步到本地目录。"
+fi
+
+warn "请重启 VS Code，使新同步的 Agents/Skills 生效。"
