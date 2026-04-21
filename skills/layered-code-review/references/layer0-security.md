@@ -65,6 +65,25 @@ langfuse.secret.key=sk-lf-94562f2d-bffb-4cc0-a76d-aacd783b8609
 - `${param.xxx}` 未经转义直接输出到页面（应使用 `<c:out>` 或 JSTL 转义）
 - Scriptlet 中直接输出 `request.getParameter()` 到 HTML
 
+### `<script>` 标签内嵌服务端数据（JSON 注入）
+在 `<script>` 块中直接输出服务端对象到 JS 变量，是一类特殊的 XSS 风险：
+```jsp
+<%-- ❌ 危险：JSONObject.toString() 不转义 HTML 特殊字符 --%>
+window.BSG.config = ${bean.getConfig()};
+
+<%-- 如果 getName() 返回 "</script><script>alert(1)//"，会提前关闭 script 标签 --%>
+window.BSG.name = '${bean.getName()}';
+```
+**修复方式：** 在服务端对 JSON 字符串做 HTML-safe 转义：
+```java
+// 替换危险字符，防止提前关闭 <script> 标签
+return jsonObject.toString()
+    .replace("<", "\\u003c")
+    .replace(">", "\\u003e")
+    .replace("&", "\\u0026");
+```
+字符串值应使用 `bs:escapeJS()` 逐字段转义，或通过 `data-*` 属性传递并在 JS 中读取。
+
 ### 不安全的 include
 - `<jsp:include page="${param.page}"/>` — 用户可控的 include 路径
 

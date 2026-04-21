@@ -1,7 +1,8 @@
 # Layer 4 — 测试覆盖评估
 
-> Layer 4 只做**分析与评估**，给出需要覆盖的测试场景清单。
-> 如需生成测试骨架代码，请调用 `/create-ut` skill。
+> **注意：** 此文件目前由 `/ut-generator` skill 使用，用于指导生成测试骨架代码。
+> `layered-code-review` skill 的 Layer 4 已精简为轻量提示，不再引用本文件。
+> 如需生成单元测试，请在 layered-code-review 完成后执行 `/ut-generator`。
 
 ---
 

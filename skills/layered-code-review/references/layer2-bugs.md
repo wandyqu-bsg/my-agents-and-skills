@@ -47,12 +47,54 @@ super.setCurrency(currency);
 ```
 
 ### 事务 / 持久化
-- @TransactionalMethod 方法内有循环调用 DB 操作（N+1 问题）
-- 事务方法中抛出了 checked exception（Spring 默认不回滚）
+- `@Transactional` 方法内有循环调用 DB 操作（N+1 问题）
+- 事务方法中抛出了 checked exception（Spring 默认不回滚 checked exception）
 - 在事务外部调用了会修改持久化状态的方法
 
-### 并发
-- 多线程共享的可变状态没有同步（`static` 可变字段尤其危险）
+### 并发与线程安全（重点检查清单）
+
+**Spring Bean 实例变量：**
+- Spring Bean（`@Service`、`@Component`、`@Controller`）是单例，实例变量被所有请求共享
+- 非 `final`、非线程安全（如 `ArrayList`、`HashMap`）的实例变量被多线程读写 → 🔴
+- `static` 可变字段尤其危险，必须使用 `AtomicXxx` 或同步块
+
+**Spring 事务代理穿透：**
+- `@Transactional` 方法被**同类内部**的其他方法直接调用（`this.doSomething()`）
+- Spring AOP 基于代理，内部调用绕过代理，事务不生效 → 🔴
+- 解决方案：通过注入自身引用 (`@Autowired private SomeService self`) 或抽到另一个 Bean
+
+**ThreadLocal 泄漏：**
+- `ThreadLocal.set()` 后没有在 `finally` 中调用 `remove()`
+- 线程池复用线程，上一次请求残留的 ThreadLocal 值会污染下一次请求
+
+**项目惯用模式 `ThreadCacheManager`：**
+- `ThreadCacheManager.beginContext(...)` 必须与 `endContext()` 配对
+- `endContext()` 必须在 `finally` 块中执行，防止异常时缓存泄漏
+- **示例（正确）：**
+  ```java
+  ThreadCacheManager.beginContext("*");
+  try {
+      // 业务逻辑
+  } finally {
+      ThreadCacheManager.endContext();
+  }
+  ```
+
+**状态切换方法：**
+- 修改对象内部状态（如 `switchToNetReturn()` / `switchToGrossReturn()`）的方法调用序列
+- 若中间步骤抛出异常，对象会停留在错误状态，影响后续计算 → 🟡
+- 应用 `try/finally` 保证状态恢复：
+  ```java
+  try {
+      switchToNetReturn();
+      obj.put("netFees", getReturnForPeriod(period));
+  } finally {
+      switchToGrossReturn(); // 确保无论是否异常都恢复到 gross 模式
+  }
+  ```
+
+**集合并发修改：**
+- 在循环中修改被多线程共享的集合，缺少同步保护
 - 懒加载单例没有 double-checked locking 或 `volatile`
 
 ---
