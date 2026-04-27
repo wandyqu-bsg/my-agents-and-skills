@@ -1,5 +1,5 @@
 ---
-description: "全链路代码提交工作流：代码审查 → 确认修复 → 快速复核 → 生成 UT → 本地检查提醒 → 提交提醒。Use when: 准备提交代码、创建 MR、走完整提交流程、pr workflow、提交代码工作流、code review and commit"
+description: "全链路代码提交工作流：代码审查 → 确认修复 → 快速复核 → 生成 UT → 本地静态检查（含自动修复）→ 提交提醒。Use when: 准备提交代码、创建 MR、走完整提交流程、pr workflow、提交代码工作流、code review and commit"
 name: PR Workflow
 tools: [execute, read, edit, search, todo]
 argument-hint: "可选：审查范围，默认审查所有本地未提交改动"
@@ -34,7 +34,7 @@ PR Workflow 开始
   Step 2  根据审查结果修复代码（code-review-fixer）[确认后执行]
   Step 3  快速复核（peer-review）[确认后执行，可循环]
   Step 4  生成单元测试（ut-generator）[可选，确认后执行]
-  Step 5  本地静态检查提醒
+  Step 5  本地静态检查（code-style-checks）[含自动修复，确认后执行]
   Step 6  提交代码提醒（commit-code）
 ======================================
 ```
@@ -148,23 +148,24 @@ skill 内部会处理问题确认和逐条修复。skill 完成后，询问：
 
 ---
 
-## Step 5 — 本地静态检查提醒
+## Step 5 — 本地静态检查
 
-**不执行任何命令。** 输出以下提醒区块：
+询问：
 
 ```
-======================================
-⏸️  本地静态检查（请手动执行）
-======================================
-在提交代码前，请在项目根目录运行以下检查：
-
-  ant checkstyle             # 代码风格检查
-  ant style-checks           # 样式规范检查
-  ant static-analysis-checks # 静态分析检查
-
-确认三项均通过后，继续 Step 6。
-======================================
+---
+是否执行本地静态检查？(Y/N)
+- Y：执行 code-style-checks，根据改动文件智能匹配检查命令（checkstyle / style-checks /
+     static-analysis-checks / functional-test-checks / npm-lint），失败时自动尝试修复
+- N：跳过，直接进入 Step 6 提交提醒
+---
 ```
+
+**等待用户回复。**
+
+若选择 Y，读取并执行 `~/.copilot/skills/code-style-checks/SKILL.md`。
+
+skill 内部会处理检查命令匹配、用户确认、执行与自动修复逻辑，skill 完成后继续 Step 6。
 
 ---
 
@@ -181,9 +182,9 @@ skill 内部会处理问题确认和逐条修复。skill 完成后，询问：
   ✅ Step 2  代码修复（如执行）
   ✅ Step 3  快速复核（如执行）
   ✅ Step 4  单元测试生成（如执行）
-  ⏸️  Step 5  本地静态检查（请手动确认通过）
+  ✅ Step 5  本地静态检查（如执行）
 
-下一步：确认本地检查通过后，在 Copilot Chat 中执行：
+下一步：在 Copilot Chat 中执行：
 
   @commit-code
 

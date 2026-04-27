@@ -305,20 +305,107 @@ describe('ClassA', () => {
 
 ---
 
-### Step 4 — 输出汇总
+### Step 4 — 运行测试并自动修复
 
-生成完成后，输出以下汇总：
+代码写入文件后，**自动运行测试，循环修复直到全部通过**。
+
+#### 4.1 检测构建系统并确定运行命令
+
+**Java 项目**：在工作区根目录查找 `build.xml`；
+- 若存在 → 使用 Ant：
+  ```bash
+  cd <项目根目录>
+  ant compile-junit-tests run-junit-test -Dtestclass=<完整类名>
+  ```
+  例：
+  ```bash
+  cd /home/wandyqu/dev/backstop/app
+  ant compile-junit-tests run-junit-test -Dtestclass=com.backstopsolutions.api.resources.fund.FooServiceTest
+  ```
+- 若不存在 `build.xml`，查找 `pom.xml` → 使用 Maven：
+  ```bash
+  mvn test -pl <模块> -Dtest=<类名> -q
+  ```
+- 若为 Gradle → 使用：
+  ```bash
+  ./gradlew test --tests <完整类名>
+  ```
+
+**TypeScript/JavaScript 项目**：
+```bash
+cd react-apps
+pnpm test -- --testPathPattern="<测试文件相对路径>" --no-coverage
+```
+
+> **完整类名**由 Step 3 中写入的文件路径推算：`src/test/java/com/example/FooTest.java` → `com.example.FooTest`
+
+#### 4.2 运行 → 判断结果 → 修复循环
+
+```
+运行测试
+    │
+    ├─ 全部通过 ──────────────────────────────────────────→ 进入 Step 5
+    │
+    └─ 存在失败
+          │
+          ├─ 解析失败原因（编译错误 / 断言失败 / 异常）
+          ├─ 定位失败的测试方法
+          ├─ 修复 UT 代码（见修复策略）
+          ├─ 重新运行测试
+          └─ 重复，最多 3 轮
+                │
+                ├─ 3 轮内全部通过 ──────────────────────→ 进入 Step 5
+                └─ 3 轮后仍有失败 ──────────────────────→ 报告剩余失败，请求用户介入
+```
+
+**每轮修复前输出诊断信息：**
+```
+--------------------------------------
+🔴 测试失败（第 N 轮修复）
+--------------------------------------
+FooServiceTest.shouldReturnResultWhenValid
+  原因：expected: <CONFIRMED> but was: <null>
+  分析：被测方法返回 null，可能是 Mock 的 findById() 未设置返回值
+  修复：补充 when(repo.findById(...)).thenReturn(...)
+--------------------------------------
+```
+
+#### 4.3 修复策略（按失败类型）
+
+| 失败类型 | 常见原因 | 修复方向 |
+|---|---|---|
+| **编译错误** | 类名/方法名拼写错误、缺少 import、泛型不匹配 | 修正类名/方法签名；补充 import |
+| **`NullPointerException`** | Mock 未设置返回值，或 `@InjectMocks` 注入失败 | 补充 `when(...).thenReturn(...)`；检查构造注入 |
+| **断言失败** | 预期值与实际值不符 | 重新读取被测方法逻辑，修正断言期望值 |
+| **`UnnecessaryStubbingException`** | 设置了从未被调用的 Mock | 删除多余的 `when(...)` 或改用 `lenient()` |
+| **`MissingMethodInvocationException`** | `when()` 包裹的不是 Mock 方法调用 | 修正 Mock 调用语法 |
+| **方法不存在** | 被测类 API 与 Mock 不一致 | 重新读取被测类的实际方法签名后修正 |
+
+**修复原则：**
+- 优先修复 UT 代码，**不修改被测业务代码**
+- 若断言期望值需要调整，重新读取被测方法源码，理解真实行为后再修正
+- 若编译错误涉及缺少 import，通过读取项目源文件找到正确的完整类路径
+- 若 3 轮后某个测试仍无法通过，保留该测试方法但用 `@Disabled("需人工排查: <原因>")` 标注，在 Step 5 中说明
+
+---
+
+### Step 5 — 输出汇总
+
+所有测试通过（或已标注 `@Disabled`）后，输出最终汇总：
 
 ```
 ======================================
-✅ 单元测试已生成
+✅ 单元测试已生成并验证通过
 ======================================
 已创建/追加：
-  📄 src/test/java/.../ClassATest.java（N 个测试方法）
-  📄 src/test/java/.../ClassBTest.java（M 个测试方法）
+  📄 src/test/java/.../ClassATest.java（N 个测试方法，全部通过）
+  📄 src/test/java/.../ClassBTest.java（M 个测试方法，全部通过）
 
 已跳过（低价值）：
   - ClassC.getX()：纯 getter，无逻辑
+
+需人工排查（@Disabled）：
+  - ClassATest.shouldXxxWhenYyy：<原因说明>
 
 --------------------------------------
 设计思路说明
