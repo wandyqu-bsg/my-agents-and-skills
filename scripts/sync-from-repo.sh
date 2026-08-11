@@ -11,9 +11,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 LOCAL_AGENTS_DIR="${HOME}/.config/Code/User/prompts"
+LOCAL_MEMORY_ROOT="${HOME}/.copilot"
 LOCAL_SKILLS_DIR="${HOME}/.copilot/skills"
+LOCAL_MEMORY_INSTRUCTIONS="${HOME}/.copilot/instructions.md"
 REPO_AGENTS_DIR="${REPO_DIR}/agents"
 REPO_SKILLS_DIR="${REPO_DIR}/skills"
+REPO_MEMORY_DIR="${REPO_DIR}/memory"
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; BLUE='\033[0;34m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC}  $1"; }
@@ -50,8 +53,10 @@ step "扫描仓库中的 Agents / Skills ..."
 
 repo_agents=()
 repo_skills=()
+repo_memory=()
 sync_agents=()
 sync_skills=()
+sync_memory=()
 
 if [ -d "$REPO_AGENTS_DIR" ]; then
   while IFS= read -r -d '' file; do
@@ -92,22 +97,50 @@ else
   warn "仓库 Skills 目录不存在: $REPO_SKILLS_DIR"
 fi
 
+if [ -f "${REPO_MEMORY_DIR}/instructions.md" ]; then
+  repo_memory+=("instructions.md")
+  if [ ! -f "$LOCAL_MEMORY_INSTRUCTIONS" ] || ! cmp -s "${REPO_MEMORY_DIR}/instructions.md" "$LOCAL_MEMORY_INSTRUCTIONS"; then
+    mkdir -p "$(dirname "$LOCAL_MEMORY_INSTRUCTIONS")"
+    cp "${REPO_MEMORY_DIR}/instructions.md" "$LOCAL_MEMORY_INSTRUCTIONS"
+    sync_memory+=("instructions.md")
+  fi
+else
+  warn "仓库个人 instructions 文件不存在: ${REPO_MEMORY_DIR}/instructions.md"
+fi
+
+if [ -d "${REPO_MEMORY_DIR}/knowledge" ]; then
+  while IFS= read -r -d '' file; do
+    rel_name="${file#${REPO_MEMORY_DIR}/}"
+    repo_memory+=("$rel_name")
+    dest="${LOCAL_MEMORY_ROOT}/${rel_name}"
+    if [ ! -f "$dest" ] || ! cmp -s "$file" "$dest"; then
+      mkdir -p "$(dirname "$dest")"
+      cp "$file" "$dest"
+      sync_memory+=("$rel_name")
+    fi
+  done < <(find "${REPO_MEMORY_DIR}/knowledge" -type f -name "*.md" ! -name ".*" -print0 | sort -z)
+else
+  warn "仓库 knowledge 目录不存在: ${REPO_MEMORY_DIR}/knowledge"
+fi
+
 echo ""
 print_list "扫描到的仓库 Agents:" "${repo_agents[@]}"
 print_list "扫描到的仓库 Skills:" "${repo_skills[@]}"
+print_list "扫描到的仓库 Memory:" "${repo_memory[@]}"
 echo ""
 print_list "成功同步到本地的 Agents:" "${sync_agents[@]}"
 print_list "成功同步到本地的 Skills:" "${sync_skills[@]}"
+print_list "成功同步到本地的 Memory:" "${sync_memory[@]}"
 echo ""
 
-if [ ${#repo_agents[@]} -eq 0 ] && [ ${#repo_skills[@]} -eq 0 ]; then
-  warn "仓库中暂未发现可同步的 Agents/Skills。"
+if [ ${#repo_agents[@]} -eq 0 ] && [ ${#repo_skills[@]} -eq 0 ] && [ ${#repo_memory[@]} -eq 0 ]; then
+  warn "仓库中暂未发现可同步的 Agents/Skills 或 Ruyi Memory。"
 fi
 
-if [ ${#sync_agents[@]} -eq 0 ] && [ ${#sync_skills[@]} -eq 0 ]; then
+if [ ${#sync_agents[@]} -eq 0 ] && [ ${#sync_skills[@]} -eq 0 ] && [ ${#sync_memory[@]} -eq 0 ]; then
   info "本地已是最新，无需同步。"
 else
-  info "远程仓库中的 Agents/Skills 已同步到本地目录。"
+  info "远程仓库中的 Agents/Skills/Memory 已同步到本地目录。"
 fi
 
 warn "请重启 VS Code，使新同步的 Agents/Skills 生效。"
